@@ -1,0 +1,467 @@
+# Load Libraries
+pacman::p_load(
+  classInt,
+  dplyr,  
+  htmlTable,
+  leaflet,
+  leaflet.extras,
+  plotly,
+  purrr,
+  RColorBrewer,
+  shiny,
+  shinycssloaders,
+  shinydashboard,
+  shinylogs,
+  shinyjs,
+  stringr,
+  tippy
+  )
+
+# Enabling Bookmarking
+enableBookmarking(store = "url")
+
+# Specify colors
+colors_mmrate <- "Greens"
+colors_mmratio <- "Reds"
+colors_uninsured <- "Blues"
+colors_medicaid <- "Purples"
+colors_csection <- "RdBu"
+colors_obgyn <- "Oranges"
+colors_midwives <- "RdPu"
+colors_poverty <- "Blues"
+
+# Processed Data Directory
+p_data_dir <- file.path("data", "processed")
+
+# Read in MMRatio file
+mmRatio <- readRDS(file.path(p_data_dir, "mmratio.rds"))
+max_mmRatio <- max(mmRatio$mmratio_per_100klb, na.rm = TRUE)
+
+# Read in MMRate file
+mmRate <- readRDS(file.path(p_data_dir, "mmrate.rds"))
+max_mmRate <- max(mmRate$mmrate_per_1kyl, na.rm = TRUE)
+
+
+## MMRATE AGE
+# Read in MMRate by age of mother file
+mmRateAge <- readRDS(file.path(p_data_dir, "mmrate_by_age_of_mother.rds")) %>%
+  mutate(County_Name = county)
+mmRateUniqueAgeGroups <- unique(as.character(mmRateAge$age_of_mother))
+mmUniqueCounties <- unique(mmRateAge$county) %>% 
+  prepend("All Counties of NJ") %>% as.character
+
+# get max mmRatio for each age group
+max_mmRate_age <- mmRateAge %>% 
+  group_by(age_of_mother) %>% 
+  summarise(age_max = max(mmrate_per_1kyl, na.rm = TRUE)) %>%
+  split(x = .$age_max, f = .$age_of_mother %>% as.character)
+
+# Read in MMrate Overall NJ by age of mother
+mmRateAgeNJ <- readRDS(file.path(p_data_dir, "mmrate_NJ_by_age_of_mother.rds"))
+
+
+## MMRATIO AGE
+# Read in MMRatio by age of mother file
+mmRatioAge <- readRDS(file.path(p_data_dir, "mmratio_by_age_of_mother.rds")) %>%
+  mutate(County_Name = county)
+mmRatioUniqueAgeGroups <- unique(as.character(mmRatioAge$age_of_mother))
+
+# get max mmRatio for each age group
+max_mmRatio_age <- mmRatioAge %>% 
+  group_by(age_of_mother) %>% 
+  summarise(age_max = max(mmratio_per_100klb, na.rm = TRUE)) %>%
+  split(x = .$age_max, f = .$age_of_mother %>% as.character)
+
+# Read in MMratio Overall NJ by age of mother
+mmRatioAgeNJ <- readRDS(file.path(p_data_dir, "mmratio_NJ_by_age_of_mother.rds"))
+
+
+## MMRATIO ETHNICITY
+# Read in MMRatio by ethnicity
+mmRatio_ethnicity <- readRDS(file.path(p_data_dir, "mmratio_by_race_ethnicity.rds")) %>% 
+  mutate(County_Name = county)
+mmRatio_ethnicity_unique_groups <- unique(mmRatio_ethnicity$ethnicity_race) %>% as.character()
+
+# Read in MMratio Overall NJ by race/ethnicity
+mmRatio_ethnicityNJ <- readRDS(file.path(p_data_dir, "mmratio_NJ_by_race_ethnicity.rds"))
+
+# Read in Shape files
+counties <- readRDS(file.path(p_data_dir, "nj_counties_simplified.RDS"))
+
+
+# County Ordering
+nj_county_order <- counties@data$FIPSCO %>% as.character %>% as.integer %>% order()
+
+birth_hosps <- readRDS(file.path(p_data_dir, "hospitals_with_delivery.rds")) # 2016 delivery hospitals
+
+# Round MMRate to 3 decimals
+mmRate$mmrate_per_1kyl <- round(mmRate$mmrate_per_1kyl, 3)
+mmRateAge$mmrate_per_1kyl <- round(mmRateAge$mmrate_per_1kyl, 3)
+mmRateAgeNJ$mmrate_per_1kyl <- round(mmRateAgeNJ$mmrate_per_1kyl, 3)
+
+
+## MAP LAYERS
+# Read in other layer df
+other_layer_df <- readRDS(file.path(p_data_dir, "other_layers.rds"))
+
+# Grab max and/or min values for legend
+max_pct_uninsured_any <- max(other_layer_df$pct_uninsured)
+max_pct_insured_medicaid <- max(other_layer_df$pct_medicaid)
+max_csection <- max(other_layer_df$ntsv_goal_diff, na.rm = TRUE)
+min_csection <- min(other_layer_df$ntsv_goal_diff, na.rm = TRUE)
+max_obgyn <- max(other_layer_df$per_capita_obgyns, na.rm = TRUE)
+max_midwives <- max(other_layer_df$per_capita_midwives, na.rm = TRUE)
+max_poverty <- max(other_layer_df$percent_poverty, na.rm = TRUE)
+
+
+# LaTeX Formulas
+mmratio_latex <- "\\begin{equation}MMRatio = \\frac{Number\\,of\\,Maternal\\,Deaths}{Number\\,of\\,Live\\,Births} * 100,000\\end{equation}"
+mmrate_latex <- "\\begin{equation}MMRate = \\frac{Number\\,of\\,Maternal\\,Deaths}{Female\\,Population\\,Ages\\,15\\,to\\,49} * 1,000\\end{equation}"
+
+# Some UI globals to avoid repeating code...
+ui_globals <- list(
+  mm_select_label = h5('Maternal Mortality Measure'),
+  mm_select_choices = list('Maternal Mortality Rate' = 'mmrate_per_1kyl',
+                            'Maternal Mortality Ratio' = 'mmratio_per_100klb'),
+  mm_select_default = 'mmratio_per_100klb',
+  
+  mm_demo_label = h5('Demographic Group'),
+  mm_demo_choices_mmratio = list('All Women' = 'all',
+                         'Age of Mother' = 'age',
+                         'Race/Ethnicity' = 'ethnicity'),
+  mm_demo_choices_mmrate = list('All Women' = 'all',
+                                 'Age of Mother' = 'age'),
+  mm_demo_default = "all",
+  mm_demo_radio_choices_mmratio = list('Age of Mother' = 'age', 'Race/Ethnicity' = 'ethnicity'),
+  mm_demo_radio_choices_mmrate = list('Age of Mother' = 'age'),
+  mm_demo_radio_default = 'age',
+  
+  mm_year_label = h3('Year'),
+  mm_year_min = 2005,
+  mm_year_max = 2017,
+  mm_year_default = 2017,
+  mm_year_sep = "",
+  mm_year_width = '800px',
+  
+  reset_tippy_text = "Resets all inputs to their defaults",
+  reset_tippy_placement = "right"
+)
+
+#' Function to create leaflet NJ Map of zoom 7.8
+#'
+#' @return: a leaflet map of NJ
+basic_map_NJ <- function() {
+  leaflet(options = leafletOptions(zoomControl = TRUE, dragging = TRUE,
+                                   minZoom = 7.8, maxZoom = 9)) %>%
+    addMapPane("polygons", zIndex = 200) %>% 
+    enableTileCaching() %>% # Add tile caching
+    # Base map & caching options
+    addProviderTiles(providers$CartoDB.Positron,
+                     options = tileOptions(useCache = TRUE, crossOrigin = TRUE)) %>%
+    setView(lng = -74.406,
+            lat = 40.058,
+            zoom = 7.8) # Set view to NJ
+}
+
+#' Function to create blue highlight options
+#'
+#' @return: blue highlight options for map
+map_highlight <- function() {
+  highlightOptions(bringToFront = FALSE,
+                   opacity = 1,
+                   weight = 5,
+                   sendToBack = FALSE,
+                   color = "blue")
+}
+
+#' Function to create label options
+#'
+#' @return: label options for map
+map_label <- function() {
+  labelOptions(
+    style = list("font-weight" = "normal", padding = "3px 8px"),
+    textsize = "10px",
+    opacity = .9,
+    direction = "auto")
+}
+
+#' Function that takes in a leaflet map and returns it with added polygons
+#' 
+#' @param leaflet_map: the map to add polygons onto
+#' @param color_scheme: the color scheme of the polygons
+#' @param layer_name: the name shown on the labels and radio button
+#' @param max_value: the max value of the data
+#' @param data_values: the data to map
+#'
+#' @return: leaflet map with added polygons
+add_polygons_layer_map <- function(leaflet_map, color_scheme, layer_name, max_value, data_values) {
+
+  data_labels_ending <- case_when(
+    grepl("Percent", layer_name) ~ paste("%", str_replace(layer_name, "Percent ", "")),
+    grepl("NTSV", layer_name) ~ "% Difference in NTSV Cesarean Rate",
+    grepl("Per Capita", layer_name) ~ paste0(" ", str_replace(layer_name, "Per Capita", "Per 100K"))
+  )
+  
+  # This layer will have negative values and use a reversed palette 
+  min_value <- if ("Difference in NTSV Rate" == layer_name) -(max_csection) else 0
+  pal_reverse <- if ("Difference in NTSV Rate" == layer_name) TRUE else FALSE
+
+  map <- leaflet_map %>% 
+    addPolygons(data = counties,
+              color = 'black',
+              fillColor = ~colorNumeric(color_scheme, c(min_value, max_value), reverse = pal_reverse)(data_values),
+              fillOpacity = .7,
+              weight = 2,
+              group = layer_name,
+              highlight = map_highlight(),
+              label = paste0(data_values, data_labels_ending),
+              options = pathOptions(pane = "polygons"))
+  return(map)
+}
+
+#' Function that takes in the slider year and returns the year to use for OBGYN data
+#' 
+#' @param slide_year: the selected year of the slider
+#'
+#' @return: the obgyn year of data shown
+obgyn_year <- function(slide_year) {
+  obgyn_year <- case_when(
+    between(slide_year, 2010, 2014) ~ 2010,
+    between(slide_year, 2015, 2016) ~ 2015,
+    slide_year == 2017 ~ 2017
+  )
+  return(obgyn_year)
+}
+
+#' Function to add a nice HTML'd data source table on the methodology tab
+#'
+#' @return: HTML for the data source table on the methodology tab
+data_source_tbl_html <- function(){
+  ds_tbl <- data.frame(
+    Statistic = c("Maternal Deaths", "Live Births", "Woman-Years Lived", "Delivery Hospitals",
+                  "Percent Uninsured", "Percent Covered by Medicaid", "% Difference in NTSV Cesarean Rate from NJ Statewide Goal",
+                  "Practitioner Midwives Per Capita", "OB/GYN Physicians Per Capita", "Percent Poverty"),
+    Definition = c(
+      'Death of a woman while pregnant or within...[365]...days of termination 
+      of pregnancy, irrespective of the duration and site of the pregnancy, from 
+      any cause related to or aggravated by the pregnancy or its management but not 
+      from accidental or incidental causes" (WHO Maternal Mortality Site).',
+      '"A live birth is defined as the complete expulsion or extraction from its mother 
+      of a product of conception, irrespective of the duration of pregnancy, which, after 
+      such separation, breathes or shows any evidence of life, such as beating of the heart, 
+      pulsation of the umbilical cord, or definite movement of voluntary muscles." 
+      (NJ SHAD Birth Data Technical Notes).',
+      'The number of years lived by a woman within the time period measured and risk of 
+      dying from maternal mortality.',
+      'The geographic location of all delivery hospitals in the state of NJ in 2016.',
+      "The total number of individuals without any insurance (public or private) divided by 
+      the total number of individuals in that county.",
+      "The total number of individuals covered by Medicaid divided by 
+      the total number of individuals in that county.",
+      '"The low-risk c-section rate is the count of infants delivered by c-section divided
+      by the count of all live nulliparous (first birth), full term (37 completed weeks or
+      more, based on the obstetric estimate), singleton (one fetus), vertex (head first)
+      births" (NJ SHAD Data Notes) multiplied by 100 to display the percentage of NTSV cesarean
+      sections.',
+      "The total number of practitioner midwives in that county as determined by the 
+      National Provider Identifier (NPI) from the Centers for Medicaid and Medicare (CMS)
+      divided by the population of women ages 15+ multiplied by 100K to display the
+      number of midwives per 100K people.",
+      "The total number of OB/GYN Physicians practicing patient care in that county as
+      determined by the American Medical Association (AMA) Master File divided by the
+      population of women ages 15+ multiplied by 100K to display the number of
+      OB/GYN physicians per 100K people.",
+      "Following the Office of Management and Budget's (OMB) Statistical Policy Directive 14, 
+      the Census Bureau uses a set of money income thresholds that vary by family size and 
+      composition to determine who is in poverty. If a family's total income is less than the 
+      family's threshold, then that family and every individual in it is considered in poverty.
+      Details are available <a href='https://www.census.gov/topics/income-poverty/poverty/guidance/poverty-measures.html'>
+      here</a>."
+    ),
+    `Data Source` = c("<a href='https://www-doh.state.nj.us/doh-shad/query/selection/mort/MortSelection.html'>NJ State Health Assessment Data (SHAD) Mortality Data</a>",
+                      "<a href='https://www-doh.state.nj.us/doh-shad/query/selection/birth/BirthSelection.html'>NJ SHAD Birth Data</a>", 
+                      "<a href='https://www.census.gov/programs-surveys/acs/data.html'>American Community Survey (ACS)</a>",
+                      "<a href='https://njogis-newjersey.opendata.arcgis.com/datasets/f15a09b7df4e408ea31ea2623dfd4e0b_8/data'>Geographic Location Shape Files</a> /
+                      <a href='https://nj.gov/health/maternal/morbidity/mhh_reportcard/all_hospitals.shtml'>NJ Delivery Hospitals</a>", "...", "...",
+                      "<a href='https://www-doh.state.nj.us/doh-shad/query/builder/birth/MODLowRiskCesarean/MOD.html'>NJ SHAD Birth Data NTSV Cesarean Delivery Rate</a> /
+                      <a href='https://www.healthypeople.gov/2020/topics-objectives/objective/mich-71'>NJ NTSV Goal</a>",
+                      "<a href='https://data.hrsa.gov/topics/health-workforce/ahrf'>Area Health Resource File (AHRF)/CMS NPI</a>",
+                      "<a href='https://data.hrsa.gov/topics/health-workforce/ahrf'>AHRF/AMA Physician Master File</a>",
+                      "<a href='https://data.hrsa.gov/topics/health-workforce/ahrf'>AHRF</a> / 
+                      <a href='https://www.census.gov/programs-surveys/saipe/data.html'>Census Small Area Income and Poverty Estimates (SAIPE)</a>"),
+    Rationale = c("NJ SHAD was chosen as the data source for maternal deaths because it provided 
+                   the most detailed information available compared to the alternatives (e.g. CDC Wonder).",
+                  "NJ SHAD was chosen as the data source for live births because it provided 
+                   the most detailed information available for the population of interest.",
+                  "ACS was chosen as the data source for woman-years lived because it provided 
+                   the most detailed information available for the population of interest.",
+                  "The New Jersey Maternal Data Center was chosen as the data source for delivery hospitals
+                  because it provided the most detailed information available for the population of interest.",
+                  "ACS was chosen as the data source for percent uninsured because it provided 
+                   the most detailed information available for the population of interest.",
+                  "ACS was chosen as the data source for percent covered by medicaid because it provided 
+                   the most detailed information available for the population of interest.",
+                  "NJ SHAD was chosen as the data source for NTSV cesarean section rates for consistency, as birth
+                   data was originally pulled from this data source.", 
+                  "AHRF was chosen as the data source for practitioner midwives because it provided 
+                   the most detailed information available for the population of interest.",
+                  "AHRF was chosen as the data source for OB/GYN physicians because it provided 
+                   the most detailed information available for the population of interest.",
+                  "This variable was readily available in the AHRF file and represented an important 
+                   social determinant of health."),
+    Notes = c(
+      "Maternal deaths were obtained by querying all deaths with the following NCHS Causes of Death: 
+      Other complications of pregnancy, childbirth and the puerperium (ICD10 O10-O99) and 
+      Pregnancy with abortive outcome (ICD10 O00-O08). While maternal deaths are usually 
+      defined as those occurring within 42 days of termination of the pregnancy and late maternal 
+      deaths are those occurring within 365 days, we use the term maternal deaths to refer to both 
+      as the NJ SHAD groups them together under these causes of death.",
+      "",
+      "Woman-years lived was obtained using ACS Summary Table B01001 from the 1-Year Estimates.",
+      "We cross referenced the hospital shape file with the delivery hospitals listed at nj.gov to obtain a
+      subset of hospitals that perform deliveries. Delivery hospitals in 2016 are shown regardless of the selected
+      year as 2016 was the most recent data we had access to. Additionally, the location and amount of delivery
+      hospitals were not expected to change much throughout the years.",
+      "Percent uninsured was obtained using ACS Summary Table B27001 from the 1-Year Estimates.",
+      "Percent covered by Medicaid was obtained using ACS Summary Table B27007 from 
+      the 1-Year Estimates.",
+      "Difference in NTSV Cesarean Rate from NJ Statewide Goal was obtained by subtracting the most current
+      NTSV State Goal of 24.7% (from 2020) from the county's NTSV Cesarean Rate. The 2020 NTSV State goal of
+      24.7% was used throughout all years.",
+      "Practitioner Midwives was obtained using the 2018-2019 AHRF County File.",
+      "OB/GYN Physicians was obtained using the 2018-2019 AHRF County File. As this data only exists
+      for 2010, 2015, and 2017, the most current data will be displayed without looking ahead. I.e. 
+      2010 data is displayed for years 2010-2014, 2015 data is displayed for 2015-2016, and 2017 for 2017.",
+      "Percent Poverty was obtained using the 2018-2019 AHRF County File."
+    )
+  )
+  
+  names(ds_tbl)[3] <- "Data Source"
+  
+  htmlTable(ds_tbl,
+            rnames = rep("", nrow(ds_tbl)),
+            css.cell = "padding: 10px",
+            useViewer = T) %>% 
+    HTML()
+}
+
+
+# Hospital html
+labels <- sprintf("<strong>%s</strong>", birth_hosps$NAME) %>% lapply(htmltools::HTML)
+
+#' Function to add delivery hospitals layer
+#'
+#' @return: delivery hospital layer with checkbox
+hospital_layer <- function(base_map) {
+  base_map %>% addCircleMarkers(data = birth_hosps, lng = ~LONGITUDE, lat = ~LATITUDE, label = labels, labelOptions = labelOptions(
+    style = list("font-weight" = "normal", padding = "3px 8px"),
+    textsize = "12px",
+    direction = "auto"), radius = 3, group = "Delivery Hospitals") %>%
+    addLayersControl(overlayGroups = "Delivery Hospitals", options = layersControlOptions(collapsed = FALSE, position = "bottomright")) %>%
+    hideGroup("Delivery Hospitals")
+}
+
+#' Function to plot mmrate or mmratio. To be used with split(.county) and lapply to create a graph for each of 22 counties
+#'
+#' @return: A graph with mmrate or mmratio on the y axis and age of mother or race/ethnicity on x axis
+one_plot <- function(mmrate_or_mmratio_df){
+  if ("mmrate_per_1kyl" %in% colnames(mmrate_or_mmratio_df)) { # Case for mmRate
+    x_axis = ~age_of_mother
+    y_axis = ~mmrate_per_1kyl %>% round(digits = 3)
+    x_label = "Age of Mother"
+    y_label = "MMRate per 1K Years Lived"
+    calc_label = "Years Lived"
+    value = mmrate_or_mmratio_df$years_lived
+  } else if ("ethnicity_race" %in% colnames(mmrate_or_mmratio_df)) { # Case for mmRatio -> Ethnicity/Race
+    x_axis = ~ethnicity_race
+    y_axis = ~mmratio_per_100klb
+    x_label = "Ethnicity/Race"
+    y_label = "MMRatio per 100K Live Births"
+    calc_label = "Live Births"
+    value = mmrate_or_mmratio_df$live_births
+  } else { # Case for mmRatio -> Age
+    x_axis = ~age_of_mother
+    y_axis = ~mmratio_per_100klb
+    x_label = "Age of Mother"
+    y_label = "MMRatio per 100K Live Births"
+    calc_label = "Live Births"
+    value = mmrate_or_mmratio_df$live_births
+  }
+  
+  plot_ly(data = mmrate_or_mmratio_df,
+          type = "bar",
+          x = x_axis,
+          y = y_axis,
+          hovertemplate = paste("Maternal Deaths: ", mmrate_or_mmratio_df$maternal_deaths, "<br>",
+                       calc_label, ": ", value %>% prettyNum(big.mark = ","), "<br>",
+                       x_label, ": ", "%{x:,}", sep = ""),
+          color = x_axis,
+          colors = "Set3"
+  ) %>%
+    add_annotations(
+      text = ~unique(County_Name),
+      x = .5,
+      y = 1,
+      xanchor = "center",
+      yanchor = "bottom",
+      align = "center",
+      yref = "paper",
+      xref = "paper",
+      showarrow = FALSE,
+      font = list(size = 15)
+    ) %>%
+    layout(showlegend = FALSE, 
+           autosize = T,
+           xaxis =list(title = x_label),
+           yaxis = list(title = y_label)
+    ) %>%
+    config(modeBarButtonsToRemove = c("select2d", "pan2d", "lasso2d", "zoomIn2d", "zoomOut2d", "autoScale2d",
+                                      "toggleSpikelines", "hoverClosestCartesian", "hoverCompareCartesian"))
+}
+
+
+#' Function to build the url to a specific county's race/ethnicity makeup for 
+#' ACS 1-Year Estimates / Table C03002
+#'
+#' @return A string representing the the right url to hyperlink to for that county
+build_census_tbl_url <- function(year_4d, fips_county, geo_level = c("county", "state")){
+  geo_level <- match.arg(geo_level)
+  
+  base_url <- "https://data.census.gov/cedsci/table?q=C03002%3A%20HISPANIC%20OR%20LATINO%20ORIGIN%20BY%20RACE&table=DP05&tid=ACSDT1Y"
+  mid_url <- ".C03002&g="
+  end_url <- "&hidePreview=true&moe=true"
+  
+  geo_str <- ifelse(geo_level == "county", "0500000", "0400000")
+  fips_county <- ifelse(geo_level == "state", "34", fips_county)
+  
+  proper_url <- paste0(base_url, year_4d, mid_url, geo_str, "US", fips_county, end_url)
+  return(proper_url)
+}
+
+
+#' Function to collect all MMR and layer data for a specified county
+#' @county: the county to pull all data for
+#' @year: the county to pull all data for
+#'
+#' @return A dataframe with MMratios, MMrates, and layer data over
+#' all years for a particular county
+county_data <- function(county, year_chosen) {
+  
+  # Pull together MMR data and layer data for this county and year
+  county_data <- counties@data %>% 
+    select(County_Name, FIPSSTCO) %>% 
+    rename(FIPS_Code = FIPSSTCO) %>% 
+    right_join(mmRate, by = "County_Name") %>% 
+    rename(maternal_deaths_15_to_49 = maternal_deaths) %>% 
+    full_join(mmRatio, by = c("County_Name", "year")) %>% 
+    filter(County_Name == county & year == year_chosen) %>% 
+    mutate(FIPS_Code = as.character(FIPS_Code),
+           year = as.numeric(year)) %>% 
+    left_join(other_layer_df, by = c("FIPS_Code", "year")) %>% 
+    mutate(
+      mmrate = format(mmrate, scientific = FALSE),
+      mmratio = format(mmratio, scientific = FALSE)
+    )
+  
+  return(county_data)
+}

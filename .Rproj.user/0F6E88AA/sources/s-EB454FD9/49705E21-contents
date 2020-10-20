@@ -1,0 +1,193 @@
+function(request){
+shinyUI(
+  fluidPage(
+    useShinyjs(),
+    ui <- dashboardPage(
+      skin = "black",
+      dashboardHeader(title = "New Jersey Maternal Mortality Dashboard", titleWidth = 425),
+      dashboardSidebar(
+        width = 170,
+        sidebarMenu(
+          menuItem("Interactive Map", tabName = "map", icon = icon("map")),
+          menuItem("Explore Demography", tabName = "bars", icon = icon("chart-bar")),
+          menuItem("How This Works", tabName = "methodology", icon = icon("cogs")),
+          menuItem("About", tabName = "about", icon = icon("heartbeat"))
+        )
+      ),
+      dashboardBody(
+        includeCSS("www/njmm_shiny.css"),
+        tabItems(
+          tabItem(
+            tabName = "map",
+            fluidRow(
+              column(3, 
+                     box(selectInput('mm_select_box',
+                                     label = ui_globals$mm_select_label,
+                                     choices = ui_globals$mm_select_choices,
+                                     selected = ui_globals$mm_select_default),
+                     div(uiOutput("mm_formula"), style = "font-size:75%"),
+                     uiOutput('demography_select_box'),
+                     conditionalPanel(
+                       condition = "input.mm_select_box == 'mmratio_per_100klb' && input.demography_select_box == 'ethnicity'",
+                       htmlOutput('ethnicity_select_box')
+                     ),
+                     conditionalPanel(
+                       condition = "input.demography_select_box == 'age'",
+                       htmlOutput('age_select_box')
+                     ),
+                     sliderInput('mm_slide_year',
+                                 label = ui_globals$mm_year_label,
+                                 min = ui_globals$mm_year_min, max = ui_globals$mm_year_max,
+                                 value = ui_globals$mm_year_default, 
+                                 sep = ui_globals$mm_year_sep, width = ui_globals$mm_year_width,
+                                 ticks = TRUE),
+                     selectInput("other_layer_box",
+                                 label = "Select a contextual variable",
+                                 choices = c("Percent Uninsured",
+                                             "Percent Covered by Medicaid",
+                                             "Difference in NTSV Rate",
+                                             "OB/GYN Physicians Per Capita",
+                                             "Practitioner Midwives Per Capita",
+                                             "Percent Poverty"),
+                                 selected = "Percent Uninsured"
+                     ),
+                     bookmarkButton(id = "bookmark1", label = "Bookmark"),
+                     actionButton("reset_input", "Reset", icon = icon("refresh")),
+                     tippy_this(elementId = "reset_input", 
+                                tooltip = ui_globals$reset_tippy_text,
+                                placement = ui_globals$reset_tippy_placement),
+                     width = "100%",
+                     title = "Input"
+                     ),
+                     box(infoBox(title = "",
+                                 subtitle = uiOutput("info_box_subtitle"),
+                                 uiOutput("info_box"),
+                                 width = "100%",
+                                 color = "red",
+                                 icon = shiny::icon("notes-medical")),
+                         title = uiOutput("info_box_title"),
+                         width = "100%")
+                     ),
+              column(9,
+                     splitLayout(cellWidths = c("50%", "50%"),
+                                 box(leafletOutput('new_jersey_map', height = 625) %>% withSpinner(color = "#B41601"),
+                                     width = "50%",
+                                     title = uiOutput("map_title")),
+                                 box(width = "50%",
+                                     title = uiOutput("layer_map_title"),
+                                     conditionalPanel(
+                                       condition = 'input.mm_slide_year >= 2010',
+                                       leafletOutput('layer_map', height = 625) %>% withSpinner(color = "#B41601")
+                                     )),
+                                 cellArgs = list(style = "padding: 3px; padding-top:0px")), 
+                     br(),
+                     helpText("Note: Due to the small number of counts in the publicly available data 
+                              used to calculate these measures of maternal mortality, the measures of 
+                              maternal mortality may be extreme (e.g. MMRatio greater than 1)."),
+                     helpText("This could be due to a number of reasons such as:"),
+                     tags$ul(
+                      tags$li("Individuals whose delivery date and maternal death occur in different 
+                             calendar years") %>% helpText(),
+                      tags$li("Individuals whose age at delivery and maternal death occur in different 
+                             age groups") %>% helpText(),
+                      tags$li("Multiple births (e.g. twins)") %>% helpText()
+                     )
+                  )
+            )
+          ),
+          tabItem(
+            tabName = "bars",
+            fluidRow(
+              column(4,
+                     box(selectInput('mm_select_box2',
+                                 label = ui_globals$mm_select_label,
+                                 choices = ui_globals$mm_select_choices,
+                                 selected = ui_globals$mm_select_default),
+                     selectInput('mm_county_box',
+                                 label = "County",
+                                 choices = mmUniqueCounties,
+                                 selected = mmUniqueCounties[1]),
+                     div(uiOutput("mm_formula2"), style = "font-size:75%"),
+                     uiOutput('demography_radio'),
+                     sliderInput('mm_slide_year2',
+                                 label = ui_globals$mm_year_label,
+                                 min = ui_globals$mm_year_min, max = ui_globals$mm_year_max,
+                                 value = ui_globals$mm_year_default, 
+                                 sep = ui_globals$mm_year_sep, width = ui_globals$mm_year_width,
+                                 ticks = TRUE),
+                     bookmarkButton(id = "bookmark2", label = "Bookmark"),
+                     actionButton("reset_input2", "Reset", icon = icon("refresh")),
+                     tippy_this(elementId = "reset_input2", 
+                                tooltip = ui_globals$reset_tippy_text,
+                                placement = ui_globals$reset_tippy_placement),
+                     width = "100%",
+                     title = "Input"
+                     )
+              ),
+              column(6,
+                     box(plotlyOutput('new_jersey_graph') %>% withSpinner(color = "#B41601"), 
+                         width = "50%", title = uiOutput("graph_title")),
+                     conditionalPanel("input.demography_radio == 'ethnicity' & input.mm_slide_year2 >= 2010",
+                                      box(title = div(icon("info-circle"), "More Info"),
+                                          uiOutput("census_tbl_url"), 
+                                          width = "100%", 
+                                          solidHeader = TRUE, status = "danger")
+                                      )
+                     )
+            )
+          ),
+          tabItem(
+            tabName = "methodology",
+                h3("Maternal Mortality Ratio (MMRatio)"),
+                p("The MMRatio is the number of maternal deaths divided by the number of live births."),
+                mmratio_latex %>% withMathJax(),
+                p("It is also commonly represented as the MMRatio per 100,000 live births which is the
+                   previous quantity multiplied by 100,000."),
+                
+                h3("Maternal Mortality Rate (MMRate)"),
+                p("The MMRate is the number of maternal deaths divided by the number of woman-years 
+                   lived between 15 and 49. Woman-years lived is the number of years lived by an 
+                   individual in the specified age range within the scope of the calculation. 
+                   For annual calculations (such as the ones in this application), this is the same 
+                   as the current female population within the specified age range."),
+                mmrate_latex %>% withMathJax(),
+                p("It is also commonly represented as the MMRate per 1,000 woman-years lived which is 
+                   the previous quantity multiplied by 1,000."),
+                
+                h3("Data Sources"),
+                data_source_tbl_html(),
+            
+                p("Note: Pacific Islander/Non-Hispanic individuals are not available under the choice 
+                  of ethnicity/race due to the fact that there were zero maternal deaths in this timeframe."),
+                p("Note: The following race/ethnicity groups are included in the Other category as they 
+                  consistently had very small counts of maternal deaths: American Indian Non-Hispanic, 
+                  Other Single Race Non-Hispanic, and Other Two or More Races Non-Hispanic.")
+          ),
+          tabItem(
+            tabName = "about",
+            mainPanel(
+              h3("This application was created through a partnership between the Women's Health Group
+                 and Advanced Analytics."),
+              br(),
+              p(strong("Women's Health Group"), "is an enterprise level team with a vision to better the 
+                health of women now and for future generations. Our mission is to deliver life-changing 
+                healthcare solutions tailored for women through science, solutions, and collective action. 
+                Our group is located within the Office of the Chief Medical Officer, which is an evidence 
+                and science based, ethics and valued driven, enterprise wide function at Johnson & Johnson."),
+              p(strong("Advanced Analytics"), "is a cross functional team within Johnson & Johnson Technology 
+                Services uniquely positioned to solve data science problems across the enterprise."),
+              br(),
+              p(strong("For more information about...")),
+              p("Women's Health Group, contact", 
+                a(href = "mailto:RCheng4@its.jnj.com", "Ru-fong Cheng")),
+              p("Advanced Analytics, reach out to", 
+                a(href = "mailto:DFriedm4@its.jnj.com", "Doug Friedman")),
+              img(src = "htc_heart_logo.svg", width = 250)
+            )
+          )
+        )
+      )
+    )
+  )
+)
+}

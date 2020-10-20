@@ -1,0 +1,1 @@
+http://gispgeoserver-prod2.kpvtpepjmv.us-east-1.elasticbeanstalk.com:80/fcc/wfs?service=WFS&version=1.0.0&request=GetFeature&maxFeatures=55&outputFormat=shape-zip&typeName=fcc:c2hgis_state

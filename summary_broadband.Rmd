@@ -1,0 +1,74 @@
+---
+title: "Broadband Summary"
+author: "Augustus Ge"
+date: "10/16/2020"
+output: pdf_document
+---
+
+# Variables Summary:
+
+```{r, echo = F}
+pacman::p_load(rgdal, dplyr, knitr, kableExtra)
+
+states <- readOGR("c2hgis_state/c2hgis_statePoint.shp", verbose = F)
+counties <- readOGR("c2hgis_county/c2hgis_countyPoint.shp", verbose = F)
+
+summary_table <-t(apply(counties@data[, c("pctpopwbba", "pctpopwobb", 
+                        "provcount_", "dsgteq25", "usgteq3")], 2, summary)) %>%
+  as.data.frame()
+rownames(summary_table) <- c("Percent pop with broadband", 
+                             "Percent pop without broadband",
+                             "Provider Count",
+                             "Percent pop with download speed 25mbps or greater",
+                             "Percent pop with upload speed 3mbps or greater")
+
+summary_table %>% kable()
+```
+
+
+# Most Common Download Speeds:
+```{r, echo = F}
+# Download Speeds
+mcds_table <- table(counties$mcds_tier) %>% as.data.frame()
+mcds_table[, 1] <- c("100,000kbps - 1gbps", "15,000kbps - 25,000kbps", "> 1gbps",
+                          "25,000kbps - 50,000kbps", "50,000kbps - 100,000kbps")
+colnames(mcds_table) <- c("Most Common Download Speeds", "Counties")
+
+mcds_table <- mcds_table %>%
+  arrange(factor(`Most Common Download Speeds`, levels = c("> 1gbps", "100,000kbps - 1gbps", 
+                                                           "50,000kbps - 100,000kbps", 
+                                                           "25,000kbps - 50,000kbps", 
+                                                           "15,000kbps - 25,000kbps")))
+mcds_table %>% kable()
+```
+
+&nbsp;
+
+# Most Common Upload Speeds:
+```{r, echo = F}
+
+# Upload Speeds
+mcus_table <- table(counties$mcus_tier) %>% as.data.frame()
+mcus_table[, 1] <- c("100,000kbps - 1gbps", "10,000kbps - 15,000kbps", "1,000kbps - 3,000kbps",
+                     "15,000kbps - 25,000kbps", "> 1gbps", "25,000kbps - 50,000kbps", 
+                     "3,000kbps - 4,000kbps", "4,000kbps - 6,000kbps", "50,000kbps - 100,000kbps",
+                     "6,000kbps - 10,000kbps")
+colnames(mcus_table) <- c("Most Common Upload Speeds", "Counties")
+
+mcus_table <- mcus_table %>% arrange(factor(`Most Common Upload Speeds`, 
+                              levels = c("> 1gbps", "100,000kbps - 1gbps", "50,000kbps - 100,000kbps",
+                                         "25,000kbps - 50,000kbps", "15,000kbps - 25,000kbps",
+                                         "10,000kbps - 15,000kbps", "6,000kbps - 10,000kbps",
+                                         "4,000kbps - 6,000kbps", "3,000kbps - 4,000kbps",
+                                         "1,000kbps - 3,000kbps")))
+mcus_table %>% kable()
+```
+
+
+# Other Variables:
+
+### County FIPS code
+### County name
+### Subscriptions tier
+### Proportion of each county with <= 1-8 providers
+### Health Connect Fund funding disbursements (hcf_comm_1?)
